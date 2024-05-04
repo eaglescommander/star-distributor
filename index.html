@@ -57,6 +57,24 @@
                     this.possibleStars -= 1;
                 }
 
+                getPossiblePointsFromParticipants() {
+                    return this.chars.split(",").reduce((acc, charId) => {
+                        charId = charId.trim();
+                        if (isNaN(charId)) charId = character_to_id[charId.toLowerCase()];
+                        if (!charId) showError(`Character with ID ${charId} not found`);
+                        return acc + characters[charId].getPossiblePoints();
+                    }, 0);
+                }
+
+                getCurrentPointsFromParticipants() {
+                    return this.chars.split(",").reduce((acc, charId) => {
+                        charId = charId.trim();
+                        if (isNaN(charId)) charId = character_to_id[charId.toLowerCase()];
+                        if (!charId) showError(`Character with ID ${charId} not found`);
+                        return acc + characters[charId].pts;
+                    }, 0);
+                }
+
                 toString() {
                     return `Do ${this.maxStars - this.possibleStars} stars for stream: ${this.chars}`;
                 }
@@ -87,6 +105,10 @@
                     return this.pts >= MAX_PTS + 400 ? 1e9 : this.pts + additionalPts;
                 }
 
+                getPossibleFanLevel() {
+                    return this.getFanLevelAtPts(this.getPossiblePoints());
+                }
+
                 willReachNextFanLevel() {
                     return this.pts + PTS_PER_STAR >= this.getInitialPts(this.getFanLevel() + 1, 0);
                 }
@@ -94,6 +116,13 @@
                 getFanLevel() {
                     for (let i = 1; i < FAN_LEVELS.length; i++) {
                         if (this.pts < FAN_LEVELS[i]) return i;
+                    }
+                    return 10;
+                }
+
+                getFanLevelAtPts(pts) {
+                    for (let i = 1; i < FAN_LEVELS.length; i++) {
+                        if (pts < FAN_LEVELS[i]) return i;
                     }
                     return 10;
                 }
@@ -174,11 +203,23 @@
                     const stream = new Stream(line.trim());
                     streams.push(stream);
 
-                    line.trim().split(",").forEach(charId => {
+                    charIds = line.trim().split(",");
+
+                    if (charIds.length === 1) {
+                        charId = charIds[0].trim();
+                        if (isNaN(charId)) charId = character_to_id[charId.toLowerCase()];
+                        if (!charId) showError(`Character with ID ${charId} not found`);
+
+                        for (let i = 0; i < 5; i++) {
+                            characters[charId].addStarFromStream(stream);
+                        }
+                        return;
+                    }
+
+                    charIds.forEach(charId => {
                         charId = charId.trim();
                         if (isNaN(charId)) charId = character_to_id[charId.toLowerCase()];
                         if (!charId) showError(`Character with ID ${charId} not found`);
-                        console.log(charId)
 
                         characters[charId].addStream(stream);
                     });
@@ -199,13 +240,35 @@
                     if (Object.keys(possibleCharacters).length === 0) break;
 
                     let characterWithLeast = Object.values(possibleCharacters).sort((a, b) => {
-                        const aPossiblePoints = a.getPossiblePoints();
-                        const bPossiblePoints = b.getPossiblePoints();
+                        
+                        const aFanLevel = a.getFanLevel();
+                        const bFanLevel = b.getFanLevel();
+
+                        if (aFanLevel !== bFanLevel) {
+                            // if a is higher and b will reach next level, prioritize b
+                            if (aFanLevel > bFanLevel && b.willReachNextFanLevel()) {
+                                return 1;
+                            }
+
+                            // if b is higher and a will reach next level, prioritize a
+                            if (bFanLevel > aFanLevel && a.willReachNextFanLevel()) {
+                                return -1;
+                            }
+
+                            return aFanLevel - bFanLevel;
+                        }
+                        
                         const aPoints = a.pts;
                         const bPoints = b.pts;
-                        const aPriority = a.willReachNextFanLevel() ? -1 : 1;
-                        const bPriority = b.willReachNextFanLevel() ? -1 : 1;
-                        return (aPossiblePoints - bPossiblePoints) || (aPoints - bPoints) || (aPriority - bPriority);
+                        
+                        if (aPoints !== bPoints) {
+                            return aPoints - bPoints;
+                        }
+
+                        const aPossiblePoints = a.getPossiblePoints();
+                        const bPossiblePoints = b.getPossiblePoints();s
+
+                        return aPossiblePoints - bPossiblePoints;
                     })[0];
 
                     if (characterWithLeast.pts >= MAX_PTS) {
@@ -213,7 +276,16 @@
                         continue;
                     }
 
-                    let stream = characterWithLeast.streams.sort((a, b) => b.possibleStars - a.possibleStars)[0];
+                    let stream = characterWithLeast.streams.sort((a, b) => {
+                        if (b.possibleStars !== a.possibleStars) {
+                            return b.possibleStars - a.possibleStars;
+                        }
+
+                        aPoints = a.getCurrentPointsFromParticipants();
+                        bPoints = b.getCurrentPointsFromParticipants();
+
+                        return aPoints - bPoints;
+                    })[0];
 
                     if (stream.possibleStars <= 0) {
                         delete possibleCharacters[characterWithLeast.id];
