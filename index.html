@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stream Stars Allocation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        table {
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: center;
+        }
+        input {
+            width: 80px;
+        }
+    </style>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const PTS_PER_STAR = 1000;
+            const MAX_PTS = 6120;
+            const FAN_LEVELS = [0, 200, 520, 960, 1520, 2200, 3000, 3920, 4960, 6120, 1e9];
+
+            const character_to_id = {
+                "kozue": "1021",
+                "tsuzuri": "1022",
+                "megumi": "1023",
+                "kaho": "1031",
+                "sayaka": "1032",
+                "rurino": "1033",
+                "ginko": "1041",
+                "kosuzu": "1042",
+                "hime": "1043"
+            };
+
+            function showError(message) {
+                alert(message);
+                throw new Error(message);
+            }
+
+            class Stream {
+                constructor(chars) {
+                    this.maxStars = 5;
+                    this.possibleStars = this.maxStars;
+                    this.chars = chars;
+                }
+
+                getPossiblePoints() {
+                    return this.possibleStars * PTS_PER_STAR;
+                }
+
+                decreasePossibleStars() {
+                    this.possibleStars -= 1;
+                }
+
+                toString() {
+                    return `Do ${this.maxStars - this.possibleStars} stars for stream: ${this.chars}`;
+                }
+            }
+
+            class Character {
+                constructor(id, name, fanLevel, pts) {
+                    this.id = id;
+                    this.name = name;
+                    this.pts = this.getInitialPts(fanLevel, pts);
+                    this.stars = 0;
+                    this.streams = [];
+                }
+
+                addStream(stream) {
+                    this.streams.push(stream);
+                }
+
+                addStarFromStream(stream) {
+                    this.pts += PTS_PER_STAR;
+                    this.fanLevel = this.getFanLevel();
+                    this.stars += 1;
+                    stream.decreasePossibleStars();
+                }
+
+                getPossiblePoints() {
+                    const additionalPts = this.streams.reduce((acc, stream) => acc + stream.getPossiblePoints(), 0);
+                    return this.pts >= MAX_PTS + 400 ? 1e9 : this.pts + additionalPts;
+                }
+
+                willReachNextFanLevel() {
+                    return this.pts + PTS_PER_STAR >= this.getInitialPts(this.getFanLevel() + 1, 0);
+                }
+
+                getFanLevel() {
+                    for (let i = 1; i < FAN_LEVELS.length; i++) {
+                        if (this.pts < FAN_LEVELS[i]) return i;
+                    }
+                    return 10;
+                }
+
+                getInitialPts(fanLevel, pts) {
+                    return FAN_LEVELS[Math.max(fanLevel - 1, 0)] + pts;
+                }
+
+                toString() {
+                    const warning = this.pts >= MAX_PTS + 400 ? " || Warning: May want to decrease stream star" : "";
+                    return `${this.name}: Allocated stars: ${this.stars}, Fan level: ${this.getFanLevel()}, pts: ${this.pts}${warning}`;
+                }
+            }
+
+            function loadInputsFromLocalStorage() {
+                const characterInputs = localStorage.getItem('characterInputs');
+                const streamSchedule = localStorage.getItem('streamSchedule');
+
+                if (characterInputs) {
+                    const rows = document.querySelectorAll('#charTable tr');
+                    JSON.parse(characterInputs).forEach((charData, index) => {
+                        if (index + 1 < rows.length) {
+                            const inputs = rows[index + 1].querySelectorAll('input');
+                            inputs[1].value = charData[1];
+                            inputs[2].value = charData[2];
+                        }
+                    });
+                }
+
+                if (streamSchedule) {
+                    document.getElementById('streamInput').value = streamSchedule;
+                }
+            }
+
+            function saveInputsToLocalStorage() {
+                const rows = document.querySelectorAll('#charTable tr');
+                const characterInputs = [];
+                rows.forEach((row, index) => {
+                    if (index === 0) return;
+                    const inputs = row.querySelectorAll('input');
+                    if (inputs.length === 3) {
+                        characterInputs.push([inputs[0].value, inputs[1].value, inputs[2].value]);
+                    }
+                });
+                localStorage.setItem('characterInputs', JSON.stringify(characterInputs));
+                localStorage.setItem('streamSchedule', document.getElementById('streamInput').value);
+            }
+
+            loadInputsFromLocalStorage();
+
+            let characters = {};
+
+            document.getElementById('process').addEventListener('click', function () {
+                saveInputsToLocalStorage();
+
+                // Read character data from the input table
+                const rows = document.querySelectorAll('#charTable tr');
+                characters = {}; // Reset characters
+
+                rows.forEach(row => {
+                    const cells = row.querySelectorAll('input');
+                    if (cells.length === 3) {
+                        const [nameInput, fanLevelInput, expInput] = cells;
+                        const name = nameInput.value;
+                        const fanLevel = parseInt(fanLevelInput.value || 1) 
+                        const exp = parseInt(expInput.value || 0);
+                        const id = character_to_id[name.toLowerCase()];
+                        characters[id] = new Character(id, name, fanLevel, exp);
+                    }
+                });
+
+                const streamInput = document.getElementById('streamInput').value;
+                const streams = [];
+
+                streamInput.trim().split("\n").forEach(line => {
+                    if (line.trim() === "") return;
+
+                    const stream = new Stream(line.trim());
+                    streams.push(stream);
+
+                    line.trim().split(",").forEach(charId => {
+                        charId = charId.trim();
+                        if (isNaN(charId)) charId = character_to_id[charId.toLowerCase()];
+                        if (!charId) showError(`Character with ID ${charId} not found`);
+                        console.log(charId)
+
+                        characters[charId].addStream(stream);
+                    });
+                });
+
+                function anyStreamHasStars() {
+                    return streams.some(stream => stream.possibleStars > 0);
+                }
+
+                let possibleCharacters = { ...characters };
+                Object.keys(possibleCharacters).forEach(key => {
+                    if (possibleCharacters[key].streams.length === 0) {
+                        delete possibleCharacters[key];
+                    }
+                });
+
+                while (anyStreamHasStars()) {
+                    if (Object.keys(possibleCharacters).length === 0) break;
+
+                    let characterWithLeast = Object.values(possibleCharacters).sort((a, b) => {
+                        const aPossiblePoints = a.getPossiblePoints();
+                        const bPossiblePoints = b.getPossiblePoints();
+                        const aPoints = a.pts;
+                        const bPoints = b.pts;
+                        const aPriority = a.willReachNextFanLevel() ? -1 : 1;
+                        const bPriority = b.willReachNextFanLevel() ? -1 : 1;
+                        return (aPossiblePoints - bPossiblePoints) || (aPoints - bPoints) || (aPriority - bPriority);
+                    })[0];
+
+                    if (characterWithLeast.pts >= MAX_PTS) {
+                        delete possibleCharacters[characterWithLeast.id];
+                        continue;
+                    }
+
+                    let stream = characterWithLeast.streams.sort((a, b) => b.possibleStars - a.possibleStars)[0];
+
+                    if (stream.possibleStars <= 0) {
+                        delete possibleCharacters[characterWithLeast.id];
+                        continue;
+                    }
+
+                    characterWithLeast.addStarFromStream(stream);
+                }
+
+                // Output the results
+                const output = document.getElementById("output");
+                output.textContent = '';
+                streams.forEach(stream => output.textContent += stream.toString() + "\n");
+                output.textContent += "\n";
+                Object.values(characters).forEach(character => output.textContent += character.toString() + "\n");
+            });
+        });
+    </script>
+</head>
+<body>
+    <h1>Stream Stars Allocation</h1>
+    <table id="charTable">
+        <tr><th>Name</th><th>Fan Level</th><th>Exp</th></tr>
+        <tr><td><input type="text" value="Ginko" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Kosuzu" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Hime" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Kaho" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Sayaka" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Rurino" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Kozue" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Tsuzuri" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+        <tr><td><input type="text" value="Megumi" disabled></td><td><input type="number" value="1"></td><td><input type="number" value="0"></td></tr>
+    </table>
+
+    <label for="streamInput">Stream Schedule (comma-separated character names per line):</label>
+    <br>
+    <textarea id="streamInput" rows="10" cols="30"></textarea>
+    <br>
+    <button id="process">Process</button>
+    <pre id="output"></pre>
+</body>
+</html>
